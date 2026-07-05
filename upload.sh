@@ -109,35 +109,58 @@ case "$UP" in
     echo
     echo "Uploading to Gofile..."
 
-    SERVER=$(curl -s https://api.gofile.io/servers \
-        | jq -r '.data.servers[0].name')
+    SERVER=$(curl -fsSL https://api.gofile.io/servers | jq -r '.data.servers[0].name')
 
     if [[ -z "$SERVER" || "$SERVER" == "null" ]]; then
-        echo "Failed to obtain upload server."
+        echo "Failed to obtain Gofile upload server."
         exit 1
     fi
 
-    RESPONSE=$(curl -s \
+    TMP_RESPONSE=$(mktemp)
+
+    echo
+    echo "==========================================="
+    echo "Uploading: $(basename "$FP")"
+    echo "==========================================="
+    echo
+
+    curl \
         --progress-bar \
+        --show-error \
+        --fail \
+        --write-out "\n\nUploaded: %{size_upload} bytes\nAverage Speed: %{speed_upload} bytes/sec\nTotal Time: %{time_total} sec\n" \
+        -o "$TMP_RESPONSE" \
         -F "file=@${FP}" \
-        "https://${SERVER}.gofile.io/uploadFile")
+        "https://${SERVER}.gofile.io/uploadFile"
+
+    echo
+
+    RESPONSE=$(cat "$TMP_RESPONSE")
+    rm -f "$TMP_RESPONSE"
 
     STATUS=$(echo "$RESPONSE" | jq -r '.status')
 
     if [[ "$STATUS" != "ok" ]]; then
-        echo
+        echo "==========================================="
         echo "Upload failed!"
         echo "$RESPONSE"
+        echo "==========================================="
         exit 1
     fi
 
     LINK=$(echo "$RESPONSE" | jq -r '.data.downloadPage')
 
+    SIZE=$(stat -c%s "$FP")
+    SIZE_HUMAN=$(du -h "$FP" | cut -f1)
+
     echo
     echo "==========================================="
-    echo "Upload Successful!"
-    echo "File : $(basename "$FP")"
-    echo "Link : $LINK"
+    echo "        GOFILE UPLOAD SUCCESSFUL"
+    echo "==========================================="
+    echo "File Name : $(basename "$FP")"
+    echo "File Size : ${SIZE_HUMAN} (${SIZE} bytes)"
+    echo "Server    : ${SERVER}"
+    echo "Link      : ${LINK}"
     echo "==========================================="
 ;;
 
