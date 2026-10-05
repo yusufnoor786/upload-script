@@ -31,8 +31,10 @@ fi
 read_secret() {
     printf "%s" "$1"
     KEY=""
+
     while IFS= read -r -s -n1 c; do
         [[ $c == $'\n' || $c == $'\0' ]] && printf "\n" && break
+
         if [[ $c == $'\177' ]]; then
             KEY="${KEY%?}"
             printf "\b \b"
@@ -85,7 +87,13 @@ case "$UP" in
     echo
     echo "Uploading to PixelDrain..."
 
-    curl --progress-bar \
+    curl \
+        --progress-bar \
+        --show-error \
+        --fail \
+        --retry 3 \
+        --retry-delay 2 \
+        --connect-timeout 15 \
         -T "$FP" \
         -u ":$KEY" \
         https://pixeldrain.com/api/file/
@@ -96,9 +104,15 @@ case "$UP" in
 4)
     echo
     echo "Uploading to Temp.sh..."
-
     echo
-    curl --progress-bar \
+
+    curl \
+        --progress-bar \
+        --show-error \
+        --fail \
+        --retry 3 \
+        --retry-delay 2 \
+        --connect-timeout 15 \
         -T "$FP" \
         https://temp.sh
 
@@ -108,50 +122,89 @@ case "$UP" in
 5)
     echo
     echo "Uploading to Gofile..."
+    echo
 
-    SERVER=$(curl -fsSL https://api.gofile.io/servers | jq -r '.data.servers[0].name')
-
-    if [[ -z "$SERVER" || "$SERVER" == "null" ]]; then
-        echo "Failed to obtain Gofile upload server."
-        exit 1
-    fi
+    # Gofile automatic upload endpoint.
+    # Gofile selects the appropriate upload region automatically.
+    GOFILE_ENDPOINT="https://upload.gofile.io/uploadfile"
 
     TMP_RESPONSE=$(mktemp)
 
-    echo
+    cleanup() {
+        rm -f "$TMP_RESPONSE"
+    }
+
+    trap cleanup EXIT
+
     echo "==========================================="
     echo "Uploading: $(basename "$FP")"
+    echo "Size     : $(du -h "$FP" | cut -f1)"
+    echo "Endpoint : $GOFILE_ENDPOINT"
     echo "==========================================="
     echo
 
-    curl \
+    START_TIME=$(date +%s)
+
+    if ! curl \
         --progress-bar \
         --show-error \
         --fail \
+        --location \
+        --connect-timeout 15 \
+        --retry 3 \
+        --retry-delay 2 \
+        --retry-connrefused \
         --write-out "\n\nUploaded: %{size_upload} bytes\nAverage Speed: %{speed_upload} bytes/sec\nTotal Time: %{time_total} sec\n" \
         -o "$TMP_RESPONSE" \
         -F "file=@${FP}" \
-        "https://${SERVER}.gofile.io/uploadFile"
+        "$GOFILE_ENDPOINT"
+    then
+        echo
+        echo "==========================================="
+        echo "           GOFILE UPLOAD FAILED"
+        echo "==========================================="
+        echo
+        cat "$TMP_RESPONSE" 2>/dev/null || true
+        exit 1
+    fi
 
     echo
 
     RESPONSE=$(cat "$TMP_RESPONSE")
-    rm -f "$TMP_RESPONSE"
 
-    STATUS=$(echo "$RESPONSE" | jq -r '.status')
+    STATUS=$(echo "$RESPONSE" | jq -r '.status // empty')
 
     if [[ "$STATUS" != "ok" ]]; then
         echo "==========================================="
-        echo "Upload failed!"
-        echo "$RESPONSE"
+        echo "           GOFILE UPLOAD FAILED"
         echo "==========================================="
+        echo
+        echo "$RESPONSE"
         exit 1
     fi
 
-    LINK=$(echo "$RESPONSE" | jq -r '.data.downloadPage')
+    LINK=$(echo "$RESPONSE" | jq -r '.data.downloadPage // empty')
+
+    if [[ -z "$LINK" || "$LINK" == "null" ]]; then
+        echo "==========================================="
+        echo "Upload completed but no download URL found."
+        echo "==========================================="
+        echo
+        echo "$RESPONSE"
+        exit 1
+    fi
 
     SIZE=$(stat -c%s "$FP")
     SIZE_HUMAN=$(du -h "$FP" | cut -f1)
+
+    END_TIME=$(date +%s)
+    ELAPSED=$((END_TIME - START_TIME))
+
+    if (( ELAPSED > 0 )); then
+        SPEED=$((SIZE / ELAPSED))
+    else
+        SPEED=0
+    fi
 
     echo
     echo "==========================================="
@@ -159,7 +212,8 @@ case "$UP" in
     echo "==========================================="
     echo "File Name : $(basename "$FP")"
     echo "File Size : ${SIZE_HUMAN} (${SIZE} bytes)"
-    echo "Server    : ${SERVER}"
+    echo "Time      : ${ELAPSED} seconds"
+    echo "Speed     : ${SPEED} bytes/sec"
     echo "Link      : ${LINK}"
     echo "==========================================="
 ;;
@@ -167,9 +221,15 @@ case "$UP" in
 6)
     echo
     echo "Uploading to Oshi.at..."
-
     echo
-    curl --progress-bar \
+
+    curl \
+        --progress-bar \
+        --show-error \
+        --fail \
+        --retry 3 \
+        --retry-delay 2 \
+        --connect-timeout 15 \
         -T "$FP" \
         https://oshi.at
 
@@ -179,6 +239,7 @@ case "$UP" in
 7)
     echo
     echo "Uploading to SourceForge..."
+    echo
 
     read -rp "Username: " USER
 
@@ -199,7 +260,13 @@ case "$UP" in
     echo
     echo "Uploading to VexFiles..."
 
-    curl -X POST https://vexfile.com/api/upload/handle \
+    curl \
+        --show-error \
+        --fail \
+        --retry 3 \
+        --retry-delay 2 \
+        -X POST \
+        https://vexfile.com/api/upload/handle \
         -H "Content-Type: application/json" \
         -d "{
             \"token\":\"$KEY\",
